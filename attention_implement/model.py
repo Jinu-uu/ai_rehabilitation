@@ -18,6 +18,13 @@ class TransFormerModel(nn.Module):
 class EncoderLayer(nn.Module):
     def __init__(self, ):
         super(EncoderLayer, self).__init__()
+        self.embedding_layer = Embedding().fowrward()
+        self.pe_layer = PositionalEncoding().forward()
+        self.multi_head_attention_layer = MultiHeadAttnetion().forward()
+        self.add_norm_layer = AddAndNorm().forward()
+        self.ff_layer = PositionWiseFeedFoward().forward()
+        self.add_norm_layer2 = AddAndNorm().forward()
+
         # 임베딩
         # 포지셔널 임베딩
         # multi head 어텐션
@@ -25,7 +32,9 @@ class EncoderLayer(nn.Module):
         # ff
         # add norm
     
-    def forward(self, ):
+    def forward(self, x):
+        # 임베딩
+        # 
         pass
 
 
@@ -95,19 +104,40 @@ class PositionalEncoding(nn.Module):
 
     def forward(self, x):
         return self.pe[:, x.size(1)]
+    
 
-
-class FeedFoward(nn.Module):
-    def __init__(self,):
-        super(FeedFoward, self).__init__()
-
-    def forward(self, ):
+class Embedding(nn.Moudule):
+    def __init__(self, input_layer, output_layer):
+        super(Embedding, self).__init__()
         pass
+
+    def fowrward(self, x, ):
+        pass
+
+
+class PositionWiseFeedFoward(nn.Module):
+    def __init__(self, d_model, d_ff):
+        # RELU(xW1 + b1)W2 + b2
+        super(PositionWiseFeedFoward, self).__init__()
+        self.linear_layer1 = nn.Linear(d_model, d_ff)
+        self.relu = nn.ReLU()
+        self.linear_layer2 = nn.Linear(d_ff, d_model)
+
+
+    def forward(self, x):
+        # x -> mha output(seq_len, d_model)
+        linear1 = self.linear_layer1(x)
+        relu = self.relu(linear1)
+        linear2 = self.linear_layer2(relu)
+        return linear2
 
 
 class AddAndNorm(nn.Module):
-    def __init__(self,):
+    def __init__(self, d_model, p_drop):
         super(AddAndNorm, self).__init__()
+        self.norm_layer = nn.LayerNorm(d_model)
+        self.dropout_layer = nn.Dropout(p_drop)
 
-    def forward(self, ):
-        pass
+    def forward(self, inputs, x):
+        norm = self.norm_layer(inputs + self.dropout_layer(x))
+        return norm
