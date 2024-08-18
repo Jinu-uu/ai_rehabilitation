@@ -4,55 +4,114 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class TransFormerModel(nn.Module):
-    def __init__(self,):
+    def __init__(self, src_vocab_size, trg_vocab_size, src_padding_idx, trg_padding_idx,
+                 max_seq_len=5000, n=6, d_model=512, d_ff=2048, h=8, d_k=64, d_v=64, p_drop=0.1):
         super(TransFormerModel,self).__init__()
+        # 인코더 디코더 임베딩 및 포지셔널 인코딩
         # 인코더
         # 디코더
         # 디코더 output linear
         # softmax
-    
-    def forward(self,):
-        pass
+        self.src_embedding_layer = Embedding(src_vocab_size, d_model, src_padding_idx)
+        self.trg_embedding_layer = Embedding(trg_vocab_size, d_model, trg_padding_idx)
+        self.encoder = EncoderStack(n, d_model, d_k, d_v, h, d_ff, p_drop)
+        self.decoder = DecoderStack(n, d_model, d_k, d_v, h, d_ff, p_drop)
+        self.dropout = nn.Dropout(p_drop)
+        self.embedding_layer = Embedding(src_vocab_size, d_model, src_padding_idx)
+        self.pe_layer = PositionalEncoding(max_seq_len, d_model)
+        self.projection = nn.Linear(d_model, trg_vocab_size, bias=False)
+
+        self.register_buffer('leftward_mask', torch.triu(torch.ones((max_seq_len, max_seq_len)), diagonal=1).bool())
+
+    @classmethod
+    def _mask_paddings(cls, x, padding_idx):
+        return x.eq(padding_idx).unsqueeze(-2).unsqueeze(1)
+
+    def forward(self, src, trg):
+        # src : [BATCH * SRC_SEQ_LEN], trg : [BATCH * TRG_SEQ_LEN]
+
+        # Mask
+        src_padding_mask = self._mask_paddings(src, self.src_padding_idx)
+        trg_padding_mask = self._mask_paddings(trg, self.trg_padding_idx)
+        trg_self_attn_mask = trg_padding_mask | self.leftward_mask[:trg.size(-1), :trg.size(-1)]
+
+        src = self.src_embedding_layer(src)
+        src = self.dropout(src + self.pe_layer(src))
+
+        x = self.encoder(src, padding_mask = src_padding_mask)
+
+        trg = self.trg_embedding_layer(trg)
+        trg = self.dropout(trg + self.pe_layer(trg))
+
+        x = self.decoder(trg, x, padding_mask = trg_self_attn_mask, enc_dec_attn_mask = src_padding_mask)
+
+        x = self.projection(x)
+        return x
+
+
+
+class EncoderStack(nn.Module):
+    def __init__(self, n, d_model, d_k, d_v, h, d_ff, p_drop):
+        super(EncoderStack, self).__init__()
+        self.encoder_layer_list = nn.ModuleList([EncoderLayer(d_model, d_k, d_v, h, d_ff, p_drop) for _ in range(n)])
+
+    def forward(self, x, padding_mask):
+        for encoder_layer in self.encoder_layer_list:
+            x = encoder_layer(x, padding_mask)
+        return x
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, ):
+    def __init__(self, d_model, d_k, d_v, h, d_ff, p_drop):
         super(EncoderLayer, self).__init__()
-        self.embedding_layer = Embedding().fowrward()
-        self.pe_layer = PositionalEncoding().forward()
-        self.multi_head_attention_layer = MultiHeadAttnetion().forward()
-        self.add_norm_layer = AddAndNorm().forward()
-        self.ff_layer = PositionWiseFeedFoward().forward()
-        self.add_norm_layer2 = AddAndNorm().forward()
+        self.multi_head_attention_layer = MultiHeadAttnetion(d_model, d_k, d_v, h)
+        self.add_norm_layer = AddAndNorm(d_model, p_drop)
+        self.ff_layer = PositionWiseFeedFoward(d_model, d_ff)
+        self.add_norm_layer2 = AddAndNorm(d_model, p_drop)
 
-        # 임베딩
-        # 포지셔널 임베딩
         # multi head 어텐션
         # add norm
         # ff
         # add norm
     
-    def forward(self, x):
-        # 임베딩
-        # 
-        pass
+    def forward(self, x, padding_mask):
+        x = self.add_norm_layer(x, self.multi_head_attention_layer(x, x, x, mask=padding_mask))
+        x = self.add_norm_layer2(x, self.ff_layer(x))
+        return x
+
+
+class DecoderStack(nn.Module):
+    def __init__(self, n, d_model, d_k, d_v, h, d_ff, p_drop):
+        super(DecoderStack, self).__init__()
+        self.decoder_layer_list = nn.ModuleList([EncoderLayer(d_model, d_k, d_v, h, d_ff, p_drop) for _ in range(n)])
+
+    def forward(self, x, x_enc, self_attn_mask, enc_dec_attn_mask):
+        for decoder_layer in self.decoder_layer_list:
+            x = decoder_layer(x, x_enc, self_attn_mask, enc_dec_attn_mask)
+
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, ):
+    def __init__(self, d_model, d_k, d_v, h, d_ff, p_drop):
         super(DecoderLayer, self).__init__()
-        # 임베딩
-        # 포지셔널 임베딩
         # masked multi head 어텐션
         # add norm
         # multi head 어텐션(Q, K는 encoderlayer output)
         # add norm
         # ff
         # add norm
+        self.multi_head_attention_layer = MultiHeadAttnetion(d_model, d_k, d_v, h)
+        self.add_norm_layer = AddAndNorm(d_model, p_drop)
+        self.multi_head_attention_layer2 = MultiHeadAttnetion(d_model, d_k, d_v, h)
+        self.add_norm_layer2 = AddAndNorm(d_model, p_drop)
+        self.ff_layer = PositionWiseFeedFoward(d_model, d_ff)
+        self.add_norm_layer3 = AddAndNorm(d_model, p_drop)
     
-    def forward(self, ):
-        pass
-
+    def forward(self, x, x_enc, self_attn_mask, enc_dec_attn_mask):
+        x = self.add_norm_layer(x, self.multi_head_attention_layer(x, x, x, mask=self_attn_mask))
+        x = self.add_norm_layer2(x, self.multi_head_attention_layer2(x,x_enc, x_enc, mask=enc_dec_attn_mask))
+        x = self.add_norm_layer3(x, self.ff_layer(x))
+        return x
 
 class MultiHeadAttnetion(nn.Module):
     def __init__(self, d_model, d_k, d_v, h):
@@ -106,13 +165,17 @@ class PositionalEncoding(nn.Module):
         return self.pe[:, x.size(1)]
     
 
-class Embedding(nn.Moudule):
-    def __init__(self, input_layer, output_layer):
+class Embedding(nn.Module):
+    def __init__(self, src_vocab_size, d_model, src_padding_idx):
         super(Embedding, self).__init__()
+        self.embedding = nn.Embedding(src_vocab_size, d_model, src_padding_idx)
+        self.scale = d_model ** 0.5
         pass
 
-    def fowrward(self, x, ):
-        pass
+    def fowrward(self, x):
+        x = self.embedding(x)
+        return x * self.scale
+
 
 
 class PositionWiseFeedFoward(nn.Module):
